@@ -254,17 +254,27 @@ def orderById(request,orderId):
     is_delivery = request.user.groups.filter(name="delivery-crew").exists()
 
     if request.method == 'GET':
-        if not is_delivery and not is_delivery:
+        if not is_delivery and not is_manager:
             order = Order.objects.filter(id=orderId,user=user.id)
             if not order:
                 return Response({'message':"this order does not exist"},
                                 status= status.HTTP_400_BAD_REQUEST)
-
+        
             orderI = OrderSerializer(data = order,many=True)
-            orderI.is_valid(raise_exception = True)
+            orderI.is_valid()
             print(orderI.data)
             return Response(orderI.data[0])
+        if is_manager:
+            order = Order.objects.filter(id=orderId)
+            orders = OrderSerializer(data=order,many=True)
 
+            if not order:
+                return Response({'message':"this order does not exist"},
+                                status= status.HTTP_400_BAD_REQUEST)
+            orders.is_valid()
+            return Response(orders.data[0])
+        return Response({'message':"You are not authorized"},
+                                status=status.HTTP_403_FORBIDDEN)
     
     if request.method == 'POST' or request.method=='PATCH':
         if is_manager:
@@ -286,74 +296,55 @@ def orderById(request,orderId):
             
             id_crew = User.objects.filter(id=delivery_crew_id).first()
          
-            orderUpdate = OrderSerializer(order,data={
-                'status':statusOrder,
-                "user": order.user.id,
+            orderNew = OrderSerializer(order,{
+                "user":order.user.id,
+                "total":order.total,
                 "date":order.date,
-                "total":order.total
-                })
-            orderUpdate.is_valid(raise_exception = True)
-            orderUpdate.delivery_crew = id_crew
+                "status":statusOrder,
+                "delivery_crew":id_crew.id
+            })
 
-            orderUpdate.save()
-            return Response(orderUpdate.data)
+            orderNew.is_valid(raise_exception = True)
+            orderNew.save()
+            return Response(orderNew.data)
+
+        elif request.method=='PATCH' and is_delivery:
+            order = Order.objects.filter(id=orderId).first()
+            
+            if not order:
+                return Response({'message':"this order does not exist"},
+                                status= status.HTTP_400_BAD_REQUEST)
+
+            if not order.delivery_crew.id == user.id:
+                return Response({'message':"You are not authorized"},
+                                status=status.HTTP_403_FORBIDDEN)
+            
+            statusOrder = request.data.get("status")
+            if not statusOrder == 1  and not statusOrder == 0:
+                return Response({'message':"invalid status field"},
+                            status= status.HTTP_400_BAD_REQUEST)
+            
+
+            orderNew = OrderSerializer(order,{
+                "user":order.user.id,
+                "total":order.total,
+                "date":order.date,
+                "status":statusOrder,
+            })
+            orderNew.is_valid(raise_exception = True)
+            orderNew.save()
+            return Response(orderNew.data)
         else:
             return Response({'message':"You are not authorized"},
                                 status=status.HTTP_403_FORBIDDEN)
 
-
-
-        if request.method == 'DELETE':
-            if is_manager:
-                order = Order.objects.filter(id=orderId)
-                if not order:
-                    return Response({'message':"item not found"},status= status.HTTP_404_NOT_FOUND)
-                order.delete()
-                return Response({"message":"order deleted"})
-            else:
-                return Response({'message':"You are not authorized"},
-                                status=status.HTTP_403_FORBIDDEN)  
-    #     if is_delivery:
-    #         statusOrder = request.data.get("status")
-    #         if ( not statusOrder == 1  and not statusOrder == 0):
-    #             return Response({'message':"invalid status field"},
-    #                         status= status.HTTP_400_BAD_REQUEST)
-    #         order = Order.objects.filter(id=orderId).first()
-    #         orderUpdate = OrderSerializer(order,data={
-    #             'status':statusOrder,
-    #             "user": order.user.id,
-	#             "date":order.date,
-    #             "total":order.total
-    #             })
-    #         orderUpdate.is_valid(raise_exception = True)
-    #         orderUpdate.save()
-    #         return Response(orderUpdate.data)
-    # if request.method == 'PATCH' or request.methods=='POST':
-    #     is_manager = request.user.groups.filter(name="manager").exists()
-    #     is_delivery = request.user.groups.filter(name="delivery-crew").exists()
-
-    #     if not is_manager and not is_delivery:
-            
-    #         statusOrder = request.data.get("status")
-    #         if ( not statusOrder == 1  and not statusOrder == 0):
-    #             return Response({'message':"invalid status field"},
-    #                         status= status.HTTP_400_BAD_REQUEST)
-    #         order = Order.objects.filter(id=orderId,user=user.id).first()
-    #         if not order:
-    #                 return Response({'message':"item not found"},status= status.HTTP_404_NOT_FOUND)
-
-
-    #     orderUpdate = OrderSerializer(order,data={
-    #         'status':statusOrder,
-    #         "user": order.user.id,
-    #         "date":order.date,
-    #         "total":order.total
-    #         })
-    #     orderUpdate.is_valid(raise_exception = True)
-    #     orderUpdate.save()
-    #     return Response(orderUpdate.data)
-
-
-
-    
-    
+    if request.method == 'DELETE':
+        if is_manager:
+            order = Order.objects.filter(id=orderId)
+            if not order:
+                return Response({'message':"item not found"},status= status.HTTP_404_NOT_FOUND)
+            order.delete()
+            return Response({"message":"order deleted"})
+        else:
+            return Response({'message':"You are not authorized"},
+                            status=status.HTTP_403_FORBIDDEN) 

@@ -8,7 +8,8 @@ class CategorySerializer (serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = ['id','slug','title']
-
+    def __str__(self) -> str:
+        return self.title
 
 
 class UserSerilizer(serializers.ModelSerializer):
@@ -30,6 +31,7 @@ class UserSerilizer(serializers.ModelSerializer):
         return user
 
 class MenuItemsSerlizer(serializers.ModelSerializer):
+    category = CategorySerializer()
     class Meta:
         model = MenuItem
         fields = ["id","title","price","featured","category"]
@@ -57,9 +59,10 @@ class OrderSerializer(serializers.ModelSerializer):
         items = OrderItem.objects.filter(
             order=order.id
         )
-        a = OrderItemSerializer(data=items,many=True)
-        a.is_valid()
-        return a.data
+        menuItems = OrderItemSerializer(data=items,many=True)
+        menuItems.is_valid()
+        return menuItems.data
+
 
 class OrderItemSerializer(serializers.ModelSerializer):
     orderItem = serializers.PrimaryKeyRelatedField(many=True,read_only=True)
