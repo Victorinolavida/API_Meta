@@ -73,10 +73,9 @@ class OrderSerializer(serializers.ModelSerializer):
     menuitems = serializers.SerializerMethodField()
     class Meta:
         model = Order
-        fields = ['id',"user","delivery_crew","total","date","menuitems","status"]
+        fields = ['id',"user","delivery_crew","total","menuitems","date","status"]
 
     def get_menuitems(self,order):
-
         items = OrderItem.objects.filter(
             order=order.id
         )
@@ -90,7 +89,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderItem
         fields = "__all__"
-        depth = 1
+        #depth = 1
 
 class OrderItemSerializerView(serializers.ModelSerializer):
     menuitem = MenuItemsSerlizerView()
