@@ -31,7 +31,12 @@ class UserSerilizer(serializers.ModelSerializer):
         return user
 
 class MenuItemsSerlizer(serializers.ModelSerializer):
-    category = CategorySerializer()
+    class Meta:
+        model = MenuItem
+        fields = ["id","title","price","featured","category"]
+    
+class MenuItemsSerlizerView(serializers.ModelSerializer):
+    category = serializers.StringRelatedField()
     class Meta:
         model = MenuItem
         fields = ["id","title","price","featured","category"]
@@ -46,6 +51,22 @@ class CartSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("quiantity must be grather than 0")
         return value
 
+class OrderSerializerView(serializers.ModelSerializer):
+    menuitems = serializers.SerializerMethodField()
+    username = serializers.CharField(
+        source="user.username", read_only=True)
+    class Meta:
+        model = Order
+        fields = ['id',"username","delivery_crew","total","date","menuitems","status"]
+
+    def get_menuitems(self,order):
+
+        items = OrderItem.objects.filter(
+            order=order.id
+        )
+        menuItems = OrderItemSerializerView(data=items,many=True)
+        menuItems.is_valid()
+        return menuItems.data
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -69,3 +90,10 @@ class OrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderItem
         fields = "__all__"
+        depth = 1
+
+class OrderItemSerializerView(serializers.ModelSerializer):
+    menuitem = MenuItemsSerlizerView()
+    class Meta:
+        model = OrderItem
+        fields = ['id','menuitem','quantity','unit_price','price','order']

@@ -2,19 +2,19 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status 
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, throttle_classes
 from django.contrib.auth.models import User,Group
 import datetime 
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated,AllowAny
+from rest_framework.throttling import  AnonRateThrottle,UserRateThrottle
 from rest_framework.decorators import permission_classes
-
+from decimal import Decimal
 from .serializers import UserSerilizer,MenuItemsSerlizer,CartSerializer,OrderSerializer,OrderItemSerializer
-
-from .models import MenuItem,Cart,Order
+from .serializers import MenuItemsSerlizerView,OrderSerializerView
+from .models import MenuItem,Cart,Order,Category
 
 from rest_framework.decorators import api_view
-
-
+from .pagination import StandardResultsSetPagination
 
 
 #@permission_classes([AnonymousUser])
@@ -28,13 +28,47 @@ class Users(APIView):
 
         return Response(data_serialized.data,status= status.HTTP_201_CREATED)
 
-@permission_classes([IsAuthenticated])
 @api_view(['GET','POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AnonRateThrottle,UserRateThrottle])
 def MenuItems(request):
     if request.method == 'GET':
         items = MenuItem.objects.all()
-        serialized_items = MenuItemsSerlizer(items,many=True)
-        return Response(serialized_items.data,status=status.HTTP_200_OK)
+
+        #filter
+        category_filter = request.query_params.get("category")
+        price_filter = request.query_params.get("price")
+        featured_filer = request.query_params.get("featured")
+        #search
+        search = request.query_params.get("search")
+        #order
+        ordering = request.query_params.get("order")
+        
+        if search:
+            items = items.filter(title__startswith=search)
+        if price_filter:
+            items = items.filter(price__lte = Decimal(price_filter))
+        if category_filter:
+            id_cat = Category.objects.filter(title=category_filter).first()
+            if id_cat:
+                items = items.filter(category=id_cat.id)
+        if featured_filer and featured_filer.lower() in ['false','true']: 
+            if featured_filer.lower() == 'false':
+                featured_filer = False
+            elif featured_filer.lower() == 'true':
+                featured_filer = True
+            items = items.filter(featured=featured_filer)
+        if ordering:
+            ordering_fiels = ordering.split(",")
+            items = items.order_by(*ordering_fiels)
+        
+        paginator = StandardResultsSetPagination()
+        result_page = paginator.paginate_queryset(items, request)
+
+        serialized_items = MenuItemsSerlizerView(result_page,many=True)
+       
+        return paginator.get_paginated_response(serialized_items.data)
+
     else:
         is_manager = request.user.groups.filter(name="manager").exists()
         if not is_manager:
@@ -46,18 +80,16 @@ def MenuItems(request):
         data_serialized.save()      
         return Response(data_serialized.data,status= status.HTTP_201_CREATED)
 
-@permission_classes([IsAuthenticated])
 @api_view(['GET','PUT','PATCH','DELETE'])
-
+@permission_classes([IsAuthenticated])
+@throttle_classes([UserRateThrottle])
 def MenuItemView(request,pk):
     if request.method == 'GET':
-        item = None
-        try:
-            item=MenuItem.objects.filter(pk=pk).first()
-        except MenuItem.DoesNotExist:   
+        item=MenuItem.objects.filter(pk=pk).first()
+        if not item:  
             return Response({'message':"item not found"},status= status.HTTP_404_NOT_FOUND)
         
-        serialized_item = MenuItemsSerlizer(item)
+        serialized_item = MenuItemsSerlizerView(item)
         return Response(serialized_item.data,status= status.HTTP_200_OK)
 
     else:
@@ -73,7 +105,6 @@ def MenuItemView(request,pk):
         if request.method == 'PUT' or request.method == 'PATCH':
             data=MenuItemsSerlizer(item,data=request.data)
             data.is_valid(raise_exception = True)
-            #data.update(data,request.data)
             data.save()
             return Response(data.data,status= status.HTTP_206_PARTIAL_CONTENT)
             
@@ -81,8 +112,9 @@ def MenuItemView(request,pk):
             item.delete()
             return Response({'message':"item deleted"},status= status.HTTP_200_OK)
 
-@permission_classes([IsAuthenticated])
 @api_view(['GET','POST'])
+@permission_classes([IsAuthenticated])
+@throttle_classes([UserRateThrottle])
 def groupsViews(request,group):
     is_manager = request.user.groups.filter(name="manager").exists()
     if not is_manager:
@@ -112,8 +144,9 @@ def groupsViews(request,group):
         
         return Response({'message':f'user {username} group updated'},status= status.HTTP_200_OK)
 
-@permission_classes([IsAuthenticated])
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+@throttle_classes([UserRateThrottle])
 def groupView(request,group,userId):
     is_manager = request.user.groups.filter(name="manager").exists()
     if not is_manager:
@@ -132,8 +165,9 @@ def groupView(request,group,userId):
     user.delete()
     return Response({'message':f"user: {user.username} was deleted"})
 
-@permission_classes([IsAuthenticated])
 @api_view(['GET','POST','DELETE'])
+@permission_classes([IsAuthenticated])
+@throttle_classes([UserRateThrottle])
 def cart(request):
     user = request.user
     if request.method == 'GET':
@@ -175,40 +209,89 @@ def cart(request):
         carts.delete()
         return Response({"message":"all items deleted"})
 
-
-
-@permission_classes([IsAuthenticated])
 @api_view(['GET','POST'])
+@permission_classes([IsAuthenticated])
+@throttle_classes([UserRateThrottle])
 def OrdersView(request):
     user = request.user
     is_manager = request.user.groups.filter(name="manager").exists()
     is_delivery = request.user.groups.filter(name="delivery-crew").exists()
     
     if request.method == 'GET':
+        orders = None
+
+        total_filter = request.query_params.get("total")
+        status_filter = request.query_params.get("status")
+        delivery = request.query_params.get("delivery")
+        #order
+        ordering = request.query_params.get("order")
+        
         if not is_manager and not is_delivery:
-            # not be a manager or delevery crew user
             orders = Order.objects.filter(user=user.id)
-            
-            orderI = OrderSerializer(data = orders, many =True)
-            
-            orderI.is_valid()
-            return Response(orderI.data)
+        
         else:
+            user = request.query_params.get("user")
+
             if is_manager:
                 orders = Order.objects.all()
-                allOrders = OrderSerializer(data=orders,many=True)
-                allOrders.is_valid()
-                return Response(allOrders.data)
+                
 
             if is_delivery:
                 orders = Order.objects.filter(delivery_crew=user.id)
-                orderDelivery = OrderSerializer(data=orders,many=True)
-                orderDelivery.is_valid()
-                return Response(orderDelivery.data)
+            
+            if user:
+                    id = User.objects.filter(username = user).first()
+                    orders = orders.filter(user=id)
+
+        if total_filter:
+            orders = orders.filter(total__lte = Decimal(total_filter))
+        if status_filter and (status_filter.lower() in ['true','false']):
+            if status_filter.lower() == 'true':
+                status_filter = True
+            else:
+                status_filter = False
+            orders = orders.filter(status=status_filter)
+        if ordering:
+            ordering_fiels = ordering.split(",")
+            orders = orders.order_by(*ordering_fiels)
+        
+        if delivery:
+            id = User.objects.filter(username=delivery).first()
+            if id:
+                if id.groups.filter(name="delivery-crew").exists():
+                    orders = orders.filter(delivery_crew = id)
+
+        if total_filter:
+            orders = orders.filter(total__lte = Decimal(total_filter))
+        if status_filter and (status_filter.lower() in ['true','false']):
+            if status_filter.lower() == 'true':
+                status_filter = True
+            else:
+                status_filter = False
+            orders = orders.filter(status=status_filter)
+        if ordering:
+            ordering_fiels = ordering.split(",")
+            orders = orders.order_by(*ordering_fiels)
+        if user:
+            id = User.objects.filter(username = user).first()
+            orders = orders.filter(user=id)
+        if delivery:
+            id = User.objects.filter(username=delivery).first()
+            if id:
+                if id.groups.filter(name="delivery-crew").exists():
+                    orders = orders.filter(delivery_crew = id)
+        
+
+        paginator = StandardResultsSetPagination()
+        result_page = paginator.paginate_queryset(orders, request)
+
+        serialized_items = OrderSerializerView(data=result_page,many=True)
+        serialized_items.is_valid()
+        return paginator.get_paginated_response(serialized_items.data)
+
 
     if request.method == 'POST':    
         cart = Cart.objects.filter(user=user.id)
-        print(cart)
         if not cart:
             return Response({'message':"cart must not be empty"},
                         status= status.HTTP_400_BAD_REQUEST)
@@ -216,7 +299,6 @@ def OrdersView(request):
         total = 0
         for item in cart:
             total += item.price
-        print(total)
         order = {
             "user":user.id,
             "total":total,
@@ -245,8 +327,9 @@ def OrdersView(request):
         return Response(new_order.data)
 
     
-@permission_classes([IsAuthenticated])
 @api_view(['GET','POST','DELETE',"PATCH"])
+@permission_classes([IsAuthenticated])
+@throttle_classes([UserRateThrottle])
 def orderById(request,orderId):
     user = request.user
 
